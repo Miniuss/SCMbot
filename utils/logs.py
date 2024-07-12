@@ -1,9 +1,22 @@
+"""
+# logs.py
+Module designed for the simpliest logging system.
+"""
+
 from enum import Enum
 from datetime import datetime
 
 logged_this_instance = False
 
 class Colors(Enum):
+    """
+    # Colors (enum class)
+    Enum class containing ANSI color codes.
+
+    Available colors are: black, red, green, yellow, blue, purple, cyan, white. Another
+    option is `reset` that will reset every color parameter for text.
+    """
+
     black  = "\033[0;30m"
     red    = "\033[0;31m"
     green  = "\033[0;32m"
@@ -15,7 +28,23 @@ class Colors(Enum):
     reset  = "\033[0m"
 
 class LogLevel():
+    """
+    # LogLevel
+    A simple class containing log level type information such as its color (for title)
+    and the title's text.
+    """
+
     def __init__(self, color: Colors, title: str):
+        """
+        ## LogLevel __init__
+        Initiates `LogLevel` class with log level's parameters.
+
+        ### Arguments
+        color: `Colors` class' enum. Used to color the title for log level.
+
+        title: String that represents log level's title (ex. "INFO" or "WARN")
+        """
+
         self.color = color
         self.title = title
 
@@ -24,14 +53,28 @@ LL_WARN = LogLevel(Colors.yellow, "WARN")
 LL_ERROR = LogLevel(Colors.red, "ERROR")
 
 def _time_now():
-    current_time = datetime.now()
-    
-    date = f"{str(current_time.day).zfill(2)}/{str(current_time.month).zfill(2)}/{current_time.year}"
-    time = f"{str(current_time.hour).zfill(2)}:{str(current_time.minute).zfill(2)}:{str(current_time.second).zfill(2)}.{str(current_time.microsecond).zfill(6)}"
+    """
+    # _time_now
+    Method returning current timestamp in `DD/MO/YY HH:MM:SS.MS` format.
+    """
 
-    return f"{date} {time}"
+    current_time = datetime.now()
+    formatted_time = current_time.strftime(r"%d/%m/%Y %H:%M:%S.%f")
+
+    return formatted_time
 
 def log(info: str, log_level: LogLevel = LL_INFO):
+    """
+    # log
+    Method that outputs info into console and `logs.log` file with datetime 
+    and log level type.
+
+    ### Arguments
+    info: String representing info that will be printed onto console and written into file
+
+    log_level: `LogLevel` class that will define level of this log. By default: preset `LL_INFO` log level, that stands for standart "INFO" log level.
+    """
+
     global logged_this_instance
 
     time = _time_now()
@@ -49,9 +92,38 @@ def log(info: str, log_level: LogLevel = LL_INFO):
 
         logs.write(f"{monochrome_log_text}\n")
 
-info = lambda info: log(info, LL_INFO)
-warn = lambda info: log(info, LL_WARN)
-error = lambda info: log(info, LL_ERROR)
+def info(info: str):
+    """
+    # info (method)
+    Shortcut function to call `log` with "INFO" log level.
+
+    ### Arguments
+    info: String representing info that will be printed onto console and written into file
+    """
+    
+    log(info, LL_INFO)
+
+def warn(info: str):
+    """
+    # warn (method)
+    Shortcut function to call `log` with "WARN" log level.
+
+    ### Arguments
+    info: String representing info that will be printed onto console and written into file
+    """
+
+    log(info, LL_WARN)
+
+def error(info: str):
+    """
+    # error (method)
+    Shortcut function to call `log` with "ERROR" log level.
+
+    ### Arguments
+    info: String representing info that will be printed onto console and written into file
+    """
+
+    log(info, LL_ERROR)
 
 if __name__ == "__main__":
     if input("Start test? [Y/N]: ").upper() == "Y":
