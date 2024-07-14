@@ -26,7 +26,7 @@ def main():
     logs.info("Launching the bot")
 
     try:
-        bot.run(bot.config["Login"]["token"])
+        bot.run(CONFIG["Login"]["token"])
     except Exception as e:
         logs.error(f"Could not launch bot: {e}")
         quit(1)
