@@ -8,9 +8,7 @@ def main():
     CONFIG.read("config.cfg")
 
     activity = discord.Game(name="Арбузный")
-
     bot = discord.Bot(activity=activity, status=discord.Status.idle)
-    bot.config = CONFIG
 
     logs.info("Loading bot's extensions...")
 
