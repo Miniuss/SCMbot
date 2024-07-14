@@ -121,12 +121,12 @@ class FormsCog(commands.Cog):
                 max_length=4096,
                 required=True,
                 name="text",
-                description="Text inside of the embed",
+                description="Text inside of the embed [NOTE: New line = \\n]",
                 name_localizations={
                     "ru": "текст"
                 },
                 description_localizations={
-                    "ru": "Текст внутри вложения"
+                    "ru": "Текст внутри вложения [ЗАМЕТКА: Новая строка = \\n]"
                 }
             ),
             discord.Option(
@@ -176,7 +176,7 @@ class FormsCog(commands.Cog):
 
         e = discord.Embed(
             title=title,
-            description=text,
+            description=text.replace("\\n", "\n"),
             color=int(str(color), 16)
         )
 
