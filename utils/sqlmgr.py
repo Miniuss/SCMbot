@@ -68,6 +68,9 @@ class DatabaseManager():
         data = self.cursor.execute(query, params)
         data = data.fetchone()
 
+        if data is None:
+            return None
+
         key_names = ("id", "uid", "upload_time", 
                      "steam_profile_url", "steam_content_url", 
                      "claimed_roles", "approver_uid")

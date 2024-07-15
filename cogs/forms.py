@@ -9,12 +9,169 @@ from os.path import exists as path_exists
 from json import load as json_load
 from json import dump as json_dump
 
+from time import time as timenow
+
+
+
 CONFIG = ConfigParser()
 CONFIG.read("config.cfg")
 
 ADMIN_ROLES = list(map(int, CONFIG["Perms"]["admin_roles"].replace(" ", "").split(",")))
 MSG_CHANNEL = int(CONFIG["Form"]["msg_channel"])
 SUBMIT_CHANNEL = int(CONFIG["Form"]["submit_channel"])
+
+DATABASE = sqlmgr.DatabaseManager("data/form_data.db")
+
+
+
+class FormModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(
+            title="Заявка на получение роли Steam Content Makers",
+            custom_id="form_modal",
+            timeout=None
+        )
+
+        self.elements = {
+            "steam_profile_url": discord.ui.InputText(
+                style=discord.InputTextStyle.short,
+                custom_id="steam_profile_url",
+                label="Ссылка на ваш профиль Steam",
+                placeholder="https://steamcommunity.com/id/...",
+                min_length=31,
+                max_length=100,
+                required=True
+            ),
+            "steam_content_url": discord.ui.InputText(
+                style=discord.InputTextStyle.long,
+                custom_id="steam_content_url",
+                label="Ссылки на ваши творчества Steam",
+                placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=...",
+                min_length=56,
+                max_length=800,
+                required=True
+            ),
+            "claimed_roles": discord.ui.InputText(
+                style=discord.InputTextStyle.long,
+                custom_id="claimed_roles",
+                label="Роли, на которые вы претендуете",
+                placeholder="Писатель руководств\nИллюстратор\nМододел и так далее...",
+                min_length=1,
+                max_length=200,
+                required=True
+            )
+        }
+
+        for e in self.elements.values():
+            self.add_item(e)
+
+    async def callback(self, inter: discord.Interaction):
+        await inter.response.defer(ephemeral=True)
+
+        uploader = inter.user
+        profile_url = self.elements["steam_profile_url"].value
+        content_url = self.elements["steam_content_url"].value
+        claimed_roles = self.elements["claimed_roles"].value
+
+        DATABASE.write_form_data(
+            uid=uploader.id,
+            upload_time=round(timenow()),
+            steam_profile_url=profile_url,
+            steam_content_url=content_url,
+            claimed_roles=claimed_roles
+        )
+
+        form_id = DATABASE.exctract_record_data(uid=uploader.id)["id"]
+        channel = inter.guild.get_channel(SUBMIT_CHANNEL)
+
+        embed = discord.Embed(
+            title=f"Заявка {uploader.display_name}",
+            color=discord.Color.dark_purple(),
+            url=uploader.jump_url
+        )
+
+        embed.add_field(
+            name="Об участнике",
+            value=f"Дата присоединения: <t:{round(uploader.joined_at.timestamp())}:f>\n"
+                  f"Дата создания аккаунта: <t:{round(uploader.created_at.timestamp())}:f>\n"
+                  f"Упоминание: {uploader.mention}\n"
+                  f"Идентификатор пользователя: {uploader.id}",
+            inline=False
+        )
+        embed.add_field(
+            name="Ссылка на профиль Steam",
+            value=profile_url,
+            inline=False
+        )
+        embed.add_field(
+            name="Ссылки на творчества Steam",
+            value=content_url,
+            inline=False
+        )
+        embed.add_field(
+            name="Претендованные роли",
+            value=claimed_roles,
+            inline=False
+        )
+        embed.add_field(
+            name="Ответственность принятия или отказа формы",
+            value="Принимая форму участника, вы подтверждаете, что уже ознакомлены с "
+                  "его профилем и творчеством, и что форма удовлетворяет всем параметрам. "
+                  "После принятия формы вы отправите личное сообщение участнику с информацией "
+                  "о его форме, принявшем человеке, и берёте на себя обязанность предоставить "
+                  "необходимые роли участнику.\n\n"
+                  "Отклоняя форму участника, вы подтверждаете, что ознакомились с его "
+                  "профилем, и форма не удовлетворяет параметрам. После отклонения формы вы "
+                  "отправите личное сообщение участнику об отказе формы с её информацией, "
+                  "информацией об отказывающем человеке.",
+            inline=False
+        )
+
+        embed.set_thumbnail(url=uploader.avatar.url)
+        embed.set_footer(
+            text=f"Идентификатор формы: #{form_id}"
+        )
+
+        await channel.send(embed=embed)
+
+        response_embed = discord.Embed(
+            title="Форма успешно отправлена",
+            description="Ваша заявка на получение роли была успешно отправлена "
+                        "администрации этого сервера.\n"
+                        "Ожидайте ответа!",
+            color=discord.Color.green()
+        )
+        response_embed.set_footer(text=f"Идентификатор формы: #{form_id}")
+
+        await inter.respond(embed=response_embed, ephemeral=True)
+
+class FormUploadView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        custom_id="form_upload_button",
+        label="Написать заявку",
+        emoji="📝",
+        style=discord.ButtonStyle.green
+    )
+    async def form_upload_button(self, button: discord.ui.Button, inter: discord.Interaction):
+        data = DATABASE.exctract_record_data(uid=inter.user.id)
+
+        if data is not None:
+            embed = discord.Embed(
+                title="Вы уже отправляли форму!",
+                description="Извините, но вы уже отправляли заявку на получение ролей в данном сервере. Отправить форму можно лишь 1 раз каждому участнику сервера.\nПожалуйста, подождите одобрения формы и выдачи ролей.\n\nСвяжитесь с персоналом для возможности переотправки формы.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text=f"Ваш идентификатор формы: #{data["id"]}")
+
+            await inter.respond(embed=embed, ephemeral=True)
+            return
+        
+        await inter.response.send_modal(FormModal())
+
+
 
 class FormsCog(commands.Cog):
     def __init__(self, bot: discord.Bot):
@@ -78,7 +235,7 @@ class FormsCog(commands.Cog):
             embeds_list = json_load(f)
             embeds = [discord.Embed.from_dict(e) for e in embeds_list]
 
-        message = await channel.send(embeds=embeds)
+        message = await channel.send(embeds=embeds, view=FormUploadView())
 
         with open(lastmsg_path, "w") as f:
             f.write(str(message.id))
@@ -195,6 +352,8 @@ class FormsCog(commands.Cog):
         )
 
         await ctx.respond(embed=response_embed, ephemeral=True)
+
+
 
 def setup(bot: discord.Bot):
     bot.add_cog(FormsCog(bot))

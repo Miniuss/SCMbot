@@ -3,11 +3,21 @@ from discord.ext import commands
 from utils import logs
 import traceback
 
+from cogs.forms import FormUploadView
+
 class EventsCog(commands.Cog):
     def __init__(self, bot: discord.Bot):
         @bot.event
         async def on_ready():
             logs.info("Bot is running now...")
+
+            logs.info("Listening to views...")
+
+            try:
+                bot.add_view(FormUploadView())
+            except Exception as e:
+                logs.warn(f"Could not listen for views: {e}")
+
             logs.info("Syncing commands...")
 
             try:
