@@ -86,7 +86,7 @@ class FormModal(discord.ui.Modal):
 
         embed = discord.Embed(
             title=f"Заявка {uploader.display_name}",
-            color=discord.Color.dark_purple(),
+            color=discord.Color(int("FFFFFF", 16)),
             url=uploader.jump_url
         )
 
@@ -113,26 +113,13 @@ class FormModal(discord.ui.Modal):
             value=claimed_roles,
             inline=False
         )
-        embed.add_field(
-            name="Ответственность принятия или отказа формы",
-            value="Принимая форму участника, вы подтверждаете, что уже ознакомлены с "
-                  "его профилем и творчеством, и что форма удовлетворяет всем параметрам. "
-                  "После принятия формы вы отправите личное сообщение участнику с информацией "
-                  "о его форме, принявшем человеке, и берёте на себя обязанность предоставить "
-                  "необходимые роли участнику.\n\n"
-                  "Отклоняя форму участника, вы подтверждаете, что ознакомились с его "
-                  "профилем, и форма не удовлетворяет параметрам. После отклонения формы вы "
-                  "отправите личное сообщение участнику об отказе формы с её информацией, "
-                  "информацией об отказывающем человеке.",
-            inline=False
-        )
 
         embed.set_thumbnail(url=uploader.avatar.url)
         embed.set_footer(
             text=f"Идентификатор формы: #{form_id}"
         )
 
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, view=FormModSubmitView(uploader.id))
 
         response_embed = discord.Embed(
             title="Форма успешно отправлена",
@@ -170,6 +157,138 @@ class FormUploadView(discord.ui.View):
             return
         
         await inter.response.send_modal(FormModal())
+
+class FormModSubmitView(discord.ui.View):
+    def __init__(self, uid: int):
+        super().__init__(timeout=None)
+        self.uid = uid
+
+    @discord.ui.button(
+        custom_id="form_approve_button",
+        label="Принять форму",
+        emoji="✔️",
+        style=discord.ButtonStyle.green
+    )
+    async def approve(self, button: discord.ui.Button, inter: discord.Interaction):
+        uploader = inter.guild.get_member(self.uid)
+        approver = inter.user
+
+        if not any(role.id in ADMIN_ROLES for role in approver.roles):
+            response_embed = discord.Embed(
+                title="Нету прав",
+                description="У вас недостаточно прав для этого действия",
+                color=discord.Color.dark_red()
+            )
+
+            await inter.respond(embed=response_embed, ephemeral=True)
+            return
+
+        if uploader is None:
+            DATABASE.remove_record(uid=self.uid)
+
+            response_embed = discord.Embed(
+                title="Участник не на сервере",
+                description="Не удалось найти участника на сервере.\n"
+                            "Участник, кому пренадлежит данная форма, скорее всего "
+                            "вышел с сервера. Форма больше недействительна и будет "
+                            "удалена с базы данных бота для возможности участнику её "
+                            "переотправить и в целях оптимизации памяти.",
+                color=discord.Color.red()
+            )
+
+            await inter.respond(response_embed)
+            self.disable_all_items()
+
+            return
+        
+        await inter.response.defer()
+
+        DATABASE.role_approval(approver.id, uid=self.uid)
+
+        user_embed = discord.Embed(
+            title=f"Ваша форма в {inter.guild.name} была принята!",
+            description=f"Администратор **{approver.global_name}** принял вашу форму!\n"
+                        f"Пожалуйста, ожидайте получение роли",
+            color=discord.Color.green()
+        )
+        user_embed.set_footer(text=f"Идентификатор подтвердителя: {approver.id}")
+
+        dm_channel = await uploader.create_dm()
+        await dm_channel.send(embed=user_embed)
+
+        response_embed = discord.Embed(
+            title=f"{approver.global_name} подтвердил эту форму",
+            description=f"Идентификатор подтвердителя: {approver.id}",
+            color=discord.Color.dark_green()
+        )
+
+        self.disable_all_items()
+
+        await inter.message.edit(view=self)
+        await inter.respond(embed=response_embed)
+
+    @discord.ui.button(
+        custom_id="form_disapprove_button",
+        label="Отклонить форму",
+        emoji="✖️",
+        style=discord.ButtonStyle.red
+    )
+    async def reject(self, button: discord.ui.Button, inter: discord.Interaction):
+        uploader = inter.guild.get_member(self.uid)
+        approver = inter.user
+
+        if not any(role.id in ADMIN_ROLES for role in approver.roles):
+            response_embed = discord.Embed(
+                title="Нету прав",
+                description="У вас недостаточно прав для этого действия",
+                color=discord.Color.dark_red()
+            )
+
+            await inter.respond(embed=response_embed, ephemeral=True)
+            return
+
+        if uploader is None:
+            DATABASE.remove_record(uid=self.uid)
+
+            response_embed = discord.Embed(
+                title="Участник не на сервере",
+                description="Не удалось найти участника на сервере.\n"
+                            "Участник, кому пренадлежит данная форма, скорее всего "
+                            "вышел с сервера. Форма больше недействительна и будет "
+                            "удалена с базы данных бота для возможности участнику её "
+                            "переотправить и в целях оптимизации памяти.",
+                color=discord.Color.red()
+            )
+
+            await inter.respond(response_embed)
+            self.disable_all_items()
+
+            return
+        
+        await inter.response.defer()
+
+        DATABASE.role_approval(approver.id, uid=self.uid)
+
+        user_embed = discord.Embed(
+            title=f"Ваша форма в {inter.guild.name} отклонена!",
+            description=f"Администратор **{approver.global_name}** отклонил вашу форму!",
+            color=discord.Color.red()
+        )
+        user_embed.set_footer(text=f"Идентификатор отклонителя: {approver.id}")
+
+        dm_channel = await uploader.create_dm()
+        await dm_channel.send(embed=user_embed)
+
+        response_embed = discord.Embed(
+            title=f"{approver.global_name} отклонил эту форму",
+            description=f"Идентификатор отклонителя: {approver.id}",
+            color=discord.Color.dark_red()
+        )
+
+        self.disable_all_items()
+
+        await inter.message.edit(view=self)
+        await inter.respond(embed=response_embed)
 
 
 

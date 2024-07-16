@@ -3,7 +3,8 @@ from discord.ext import commands
 from utils import logs
 import traceback
 
-from cogs.forms import FormUploadView
+from cogs.forms import FormUploadView, FormModSubmitView
+from utils import sqlmgr
 
 class EventsCog(commands.Cog):
     def __init__(self, bot: discord.Bot):
@@ -15,6 +16,13 @@ class EventsCog(commands.Cog):
 
             try:
                 bot.add_view(FormUploadView())
+
+                db = sqlmgr.DatabaseManager("data/form_data.db")
+
+                for container in db.get_all_unchecked_forms_uid():
+                    uid = container[0]
+                    bot.add_view(FormModSubmitView(uid))
+
             except Exception as e:
                 logs.warn(f"Could not listen for views: {e}")
 

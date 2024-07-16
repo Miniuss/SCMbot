@@ -48,9 +48,9 @@ class DatabaseManager():
         self.cursor.execute(query, params)
         self.connection.commit()
 
-    def role_approval(self, form_id: int, approver_uid: int):
-        query = """ UPDATE forms SET approver_uid = ? WHERE form_id = ? """
-        params = (form_id, approver_uid)
+    def role_approval(self, approver_uid: int, form_id: int = -1, uid: int = -1):
+        query = """ UPDATE forms SET approver_uid = ? WHERE form_id = ? OR uid = ? """
+        params = (approver_uid, form_id, uid)
 
         self.cursor.execute(query, params)
         self.connection.commit()
@@ -59,6 +59,7 @@ class DatabaseManager():
         query = """ DELETE FROM forms WHERE form_id = ? OR uid = ? """
         params = (form_id, uid)
 
+        self.cursor.execute(query, params)
         self.connection.commit()
 
     def exctract_record_data(self, form_id: int = -1, uid: int = -1):
@@ -76,3 +77,11 @@ class DatabaseManager():
                      "claimed_roles", "approver_uid")
         
         return dict(zip(key_names, data))
+
+    def get_all_unchecked_forms_uid(self): # So specific, and all to just track FromModSubmitView...
+        query = """ SELECT uid FROM forms WHERE approver_uid IS NULL """
+
+        data = self.cursor.execute(query)
+        data = data.fetchall()
+
+        return data
