@@ -1,0 +1,10 @@
+[Login]
+token=
+
+[Perms]
+admin_roles=
+no_form_roles=
+
+[Form]
+msg_channel=
+submit_channel=
