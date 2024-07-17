@@ -17,6 +17,8 @@ CONFIG = ConfigParser()
 CONFIG.read("config.cfg")
 
 ADMIN_ROLES = list(map(int, CONFIG["Perms"]["admin_roles"].replace(" ", "").split(",")))
+NO_FORM_ROLES = list(map(int, CONFIG["Perms"]["no_form_roles"].replace(" ", "").split(",")))
+
 MSG_CHANNEL = int(CONFIG["Form"]["msg_channel"])
 SUBMIT_CHANNEL = int(CONFIG["Form"]["submit_channel"])
 
@@ -144,14 +146,28 @@ class FormUploadView(discord.ui.View):
     )
     async def form_upload_button(self, button: discord.ui.Button, inter: discord.Interaction):
         data = DATABASE.exctract_record_data(uid=inter.user.id)
+        uploader_roles = inter.user.roles
 
         if data is not None:
             embed = discord.Embed(
                 title="Вы уже отправляли форму!",
-                description="Извините, но вы уже отправляли заявку на получение ролей в данном сервере. Отправить форму можно лишь 1 раз каждому участнику сервера.\nПожалуйста, подождите одобрения формы и выдачи ролей.\n\nСвяжитесь с персоналом для возможности переотправки формы.",
+                description="Извините, но вы уже отправляли заявку на получение ролей в данном " 
+                            "сервере. Отправить форму можно лишь 1 раз каждому участнику сервера.\n"
+                            "Пожалуйста, подождите одобрения формы и выдачи ролей.\n\n"
+                            "Свяжитесь с персоналом для возможности переотправки формы.",
                 color=discord.Color.red()
             )
             embed.set_footer(text=f"Ваш идентификатор формы: #{data["id"]}")
+
+            await inter.respond(embed=embed, ephemeral=True)
+            return
+        
+        if any(role.id in NO_FORM_ROLES for role in uploader_roles):
+            embed = discord.Embed(
+                title="Вам не нужно отправлять заявку",
+                description="У вас уже присутствуют роль/роли, которые можно получить за отправку формы",
+                color=discord.Color.orange()
+            )
 
             await inter.respond(embed=embed, ephemeral=True)
             return
@@ -296,8 +312,6 @@ class FormsCog(commands.Cog):
     def __init__(self, bot: discord.Bot):
         self.bot = bot
 
-    def has_admin_roles(self):
-        return commands.has_any_role(*self.admin_roles)
 
     GROUP = discord.SlashCommandGroup(
         name="form",
@@ -361,11 +375,13 @@ class FormsCog(commands.Cog):
 
         response_embed = discord.Embed(
             title="Сообщение формы обновлено",
-            description=f"Сообщение с формой было обновлено согласно данным, предоставленными вами.\nВы можете увидеть новое сообщение [тут]({message.jump_url})",
+            description=f"Сообщение с формой было обновлено согласно данным, предоставленными "
+                        f"вами.\nВы можете увидеть новое сообщение [тут]({message.jump_url})",
             color=discord.Color.green()
         )
 
         await ctx.respond(embed=response_embed, ephemeral=True)
+
 
     @GROUP.command(
         name="set",
@@ -466,11 +482,205 @@ class FormsCog(commands.Cog):
 
         response_embed = discord.Embed(
             title="Новое сообщение установлено",
-            description="Ваше новое сообщение с формой было установлено.\nДля того, чтобы изменения вступили в силу, используйте команду `/form update`",
+            description="Ваше новое сообщение с формой было установлено.\n"
+                        "Для того, чтобы изменения вступили в силу, используйте команду "
+                        "`/form update`",
             color=discord.Color.green()
         )
 
         await ctx.respond(embed=response_embed, ephemeral=True)
+
+
+    @GROUP.command(
+        name="view",
+        description="Find and view form info",
+        name_localizations={
+            "ru": "посмотреть"
+        },
+        description_localizations={
+            "ru": "Находит и показывает информацию о форме"
+        },
+        options=(
+            discord.Option(
+                discord.SlashCommandOptionType.string,
+                min_length=1,
+                max_length=40,
+                required=False,
+                default=-1,
+                name="form_id",
+                description="Integer ID of the form",
+                name_localizations={
+                    "ru": "ид_формы"
+                },
+                description_localizations={
+                    "ru": "Целочисленный идентификатор формы"
+                }
+            ),
+            discord.Option(
+                discord.SlashCommandOptionType.string,
+                min_length=1,
+                max_length=40,
+                required=False,
+                default=-1,
+                name="user_id",
+                description="Integer ID of the user",
+                name_localizations={
+                    "ru": "ид_пользователя"
+                },
+                description_localizations={
+                    "ru": "Целочисленный идентификатор пользователя"
+                }
+            )
+        )
+    )
+    @commands.has_any_role(*ADMIN_ROLES)
+    async def fview(self, ctx: discord.ApplicationContext, form_id: str = -1, user_id: str = -1):
+        if form_id == -1 and user_id == -1:
+            embed = discord.Embed(
+                title="Нету аргументов",
+                description="Хотя-бы один из аргументов команды должен быть равен чему-то",
+                color=discord.Color.orange()
+            )
+
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+
+        try:
+            form_id = int(form_id)
+            user_id = int(user_id)
+        except ValueError:
+            embed = discord.Embed(
+                title="Неверное значение ИД формы/пользователя",
+                description="ИД должно быть целым числом!",
+                color=discord.Color.dark_red()
+            )
+
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+        
+        data = DATABASE.exctract_record_data(form_id=form_id, uid=user_id)
+
+        if data is None:
+            embed = discord.Embed(
+                title="Данные отсутствуют",
+                color=discord.Color.orange()
+            )
+
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+        
+        id = data["id"]
+        upload_time = data["upload_time"]
+        steam_profile_url = data["steam_profile_url"]
+        steam_content_url = data["steam_content_url"]
+        claimed_roles = data["claimed_roles"]
+        
+        uploader = data["uid"]
+        approver = data["approver_uid"] or "Нету"
+
+
+        embed = discord.Embed(
+            title=f"Форма #{id}",
+            description=f"Дата загрузки: <t:{upload_time}:f>\n"
+                        f"ИД отправителя: {uploader}\n"
+                        f"ИД подтвердителя/отклонителя: {approver}",
+            color=discord.Color(int("FFFFFF", 16))
+        )
+        embed.add_field(
+            name="Ссылка на профиль Steam",
+            value=steam_profile_url,
+            inline=False
+        )
+        embed.add_field(
+            name="Ссылки на творчества Steam",
+            value=steam_content_url,
+            inline=False
+        )
+        embed.add_field(
+            name="Претендованные роли",
+            value=claimed_roles,
+            inline=False
+        )
+
+        await ctx.respond(embed=embed, ephemeral=True)
+
+
+    @GROUP.command(
+        name="delete",
+        description="Deletes form data forever",
+        name_localizations={
+            "ru": "удалить"
+        },
+        description_localizations={
+            "ru": "Удаляет навсегда данные формы"
+        },
+        options=(
+            discord.Option(
+                discord.SlashCommandOptionType.string,
+                min_length=1,
+                max_length=40,
+                required=False,
+                default=-1,
+                name="form_id",
+                description="Integer ID of the form",
+                name_localizations={
+                    "ru": "ид_формы"
+                },
+                description_localizations={
+                    "ru": "Целочисленный идентификатор формы"
+                }
+            ),
+            discord.Option(
+                discord.SlashCommandOptionType.string,
+                min_length=1,
+                max_length=40,
+                required=False,
+                default=-1,
+                name="user_id",
+                description="Integer ID of the user",
+                name_localizations={
+                    "ru": "ид_пользователя"
+                },
+                description_localizations={
+                    "ru": "Целочисленный идентификатор пользователя"
+                }
+            )
+        )
+    )
+    @commands.has_any_role(*ADMIN_ROLES)
+    @commands.cooldown(1, 15, commands.BucketType.guild)
+    async def fdelete(self, ctx: discord.ApplicationContext, form_id: str = -1, user_id: str = -1):
+        if form_id == -1 and user_id == -1:
+            embed = discord.Embed(
+                title="Нету аргументов",
+                description="Хотя-бы один из аргументов команды должен быть равен чему-то",
+                color=discord.Color.orange()
+            )
+
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+
+        try:
+            form_id = int(form_id)
+            user_id = int(user_id)
+        except ValueError:
+            embed = discord.Embed(
+                title="Неверное значение ИД формы/пользователя",
+                description="ИД должно быть целым числом!",
+                color=discord.Color.dark_red()
+            )
+
+            await ctx.respond(embed=embed, ephemeral=True)
+            return
+        
+        DATABASE.remove_record(form_id=form_id, uid=user_id)
+
+        embed = discord.Embed(
+            title="Данные формы были удалены",
+            color=discord.Color.red()
+        )
+
+        await ctx.respond(embed=embed, ephemeral=True)
 
 
 
