@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
+
 from utils import sqlmgr
+from extras import embeds
 
 from configparser import ConfigParser
 from os.path import join as path_join
@@ -23,7 +25,6 @@ MSG_CHANNEL = int(CONFIG["Form"]["msg_channel"])
 SUBMIT_CHANNEL = int(CONFIG["Form"]["submit_channel"])
 
 DATABASE = sqlmgr.DatabaseManager("data/form_data.db")
-
 
 
 class FormModal(discord.ui.Modal):
@@ -86,51 +87,17 @@ class FormModal(discord.ui.Modal):
         form_id = DATABASE.exctract_record_data(uid=uploader.id)["id"]
         channel = inter.guild.get_channel(SUBMIT_CHANNEL)
 
-        embed = discord.Embed(
-            title=f"Заявка {uploader.display_name}",
-            color=discord.Color(int("FFFFFF", 16)),
-            url=uploader.jump_url
-        )
-
-        embed.add_field(
-            name="Об участнике",
-            value=f"Дата присоединения: <t:{round(uploader.joined_at.timestamp())}:f>\n"
-                  f"Дата создания аккаунта: <t:{round(uploader.created_at.timestamp())}:f>\n"
-                  f"Упоминание: {uploader.mention}\n"
-                  f"Идентификатор пользователя: {uploader.id}",
-            inline=False
-        )
-        embed.add_field(
-            name="Ссылка на профиль Steam",
-            value=profile_url,
-            inline=False
-        )
-        embed.add_field(
-            name="Ссылки на творчества Steam",
-            value=content_url,
-            inline=False
-        )
-        embed.add_field(
-            name="Претендованные роли",
-            value=claimed_roles,
-            inline=False
-        )
-
-        embed.set_thumbnail(url=uploader.avatar.url)
-        embed.set_footer(
-            text=f"Идентификатор формы: #{form_id}"
+        embed = embeds.FormSubmittedInfoEmbed(
+            form_id,
+            uploader,
+            profile_url,
+            content_url,
+            claimed_roles
         )
 
         await channel.send(embed=embed, view=FormModSubmitView(uploader.id))
 
-        response_embed = discord.Embed(
-            title="Форма успешно отправлена",
-            description="Ваша заявка на получение роли была успешно отправлена "
-                        "администрации этого сервера.\n"
-                        "Ожидайте ответа!",
-            color=discord.Color.green()
-        )
-        response_embed.set_footer(text=f"Идентификатор формы: #{form_id}")
+        response_embed = embeds.FormSubmitSuccessEmbed(form_id)
 
         await inter.respond(embed=response_embed, ephemeral=True)
 
@@ -146,28 +113,17 @@ class FormUploadView(discord.ui.View):
     )
     async def form_upload_button(self, button: discord.ui.Button, inter: discord.Interaction):
         data = DATABASE.exctract_record_data(uid=inter.user.id)
+
         uploader_roles = inter.user.roles
 
         if data is not None:
-            embed = discord.Embed(
-                title="Вы уже отправляли форму!",
-                description="Извините, но вы уже отправляли заявку на получение ролей в данном " 
-                            "сервере. Отправить форму можно лишь 1 раз каждому участнику сервера.\n"
-                            "Пожалуйста, подождите одобрения формы и выдачи ролей.\n\n"
-                            "Свяжитесь с персоналом для возможности переотправки формы.",
-                color=discord.Color.red()
-            )
-            embed.set_footer(text=f"Ваш идентификатор формы: #{data["id"]}")
+            embed = embeds.FormAlreadySubmittedEmbed(data["id"])
 
             await inter.respond(embed=embed, ephemeral=True)
             return
         
         if any(role.id in NO_FORM_ROLES for role in uploader_roles):
-            embed = discord.Embed(
-                title="Вам не нужно отправлять заявку",
-                description="У вас уже присутствуют роль/роли, которые можно получить за отправку формы",
-                color=discord.Color.orange()
-            )
+            embed = embeds.FromSubmitterHasRoleEmbed()
 
             await inter.respond(embed=embed, ephemeral=True)
             return
@@ -190,11 +146,7 @@ class FormModSubmitView(discord.ui.View):
         approver = inter.user
 
         if not any(role.id in ADMIN_ROLES for role in approver.roles):
-            response_embed = discord.Embed(
-                title="Нету прав",
-                description="У вас недостаточно прав для этого действия",
-                color=discord.Color.dark_red()
-            )
+            response_embed = embeds.FormNoPermsEmbed()
 
             await inter.respond(embed=response_embed, ephemeral=True)
             return
@@ -202,15 +154,7 @@ class FormModSubmitView(discord.ui.View):
         if uploader is None:
             DATABASE.remove_record(uid=self.uid)
 
-            response_embed = discord.Embed(
-                title="Участник не на сервере",
-                description="Не удалось найти участника на сервере.\n"
-                            "Участник, кому пренадлежит данная форма, скорее всего "
-                            "вышел с сервера. Форма больше недействительна и будет "
-                            "удалена с базы данных бота для возможности участнику её "
-                            "переотправить и в целях оптимизации памяти.",
-                color=discord.Color.red()
-            )
+            response_embed = embeds.FormOwnerNotFoundEmbed()
 
             await inter.respond(response_embed)
             self.disable_all_items()
@@ -221,22 +165,16 @@ class FormModSubmitView(discord.ui.View):
 
         DATABASE.role_approval(approver.id, uid=self.uid)
 
-        user_embed = discord.Embed(
-            title=f"Ваша форма в {inter.guild.name} была принята!",
-            description=f"Администратор **{approver.global_name}** принял вашу форму!\n"
-                        f"Пожалуйста, ожидайте получение роли",
-            color=discord.Color.green()
+        user_embed = embeds.FormApprovedEmbed(
+            inter.guild.name,
+            approver
         )
-        user_embed.set_footer(text=f"Идентификатор подтвердителя: {approver.id}")
 
         dm_channel = await uploader.create_dm()
+        
         await dm_channel.send(embed=user_embed)
 
-        response_embed = discord.Embed(
-            title=f"{approver.global_name} подтвердил эту форму",
-            description=f"Идентификатор подтвердителя: {approver.id}",
-            color=discord.Color.dark_green()
-        )
+        response_embed = embeds.MemberApprovedFormEmbed(approver)
 
         self.disable_all_items()
 
@@ -254,11 +192,7 @@ class FormModSubmitView(discord.ui.View):
         approver = inter.user
 
         if not any(role.id in ADMIN_ROLES for role in approver.roles):
-            response_embed = discord.Embed(
-                title="Нету прав",
-                description="У вас недостаточно прав для этого действия",
-                color=discord.Color.dark_red()
-            )
+            response_embed = embeds.FormNoPermsEmbed()
 
             await inter.respond(embed=response_embed, ephemeral=True)
             return
@@ -266,16 +200,7 @@ class FormModSubmitView(discord.ui.View):
         if uploader is None:
             DATABASE.remove_record(uid=self.uid)
 
-            response_embed = discord.Embed(
-                title="Участник не на сервере",
-                description="Не удалось найти участника на сервере.\n"
-                            "Участник, кому пренадлежит данная форма, скорее всего "
-                            "вышел с сервера. Форма больше недействительна и будет "
-                            "удалена с базы данных бота для возможности участнику её "
-                            "переотправить и в целях оптимизации памяти.",
-                color=discord.Color.red()
-            )
-
+            response_embed = embeds.FormOwnerNotFoundEmbed()
             await inter.respond(response_embed)
             self.disable_all_items()
 
@@ -285,21 +210,16 @@ class FormModSubmitView(discord.ui.View):
 
         DATABASE.role_approval(approver.id, uid=self.uid)
 
-        user_embed = discord.Embed(
-            title=f"Ваша форма в {inter.guild.name} отклонена!",
-            description=f"Администратор **{approver.global_name}** отклонил вашу форму!",
-            color=discord.Color.red()
+        user_embed = embeds.FormDeniedEmbed(
+            inter.guild.name,
+            approver
         )
-        user_embed.set_footer(text=f"Идентификатор отклонителя: {approver.id}")
 
         dm_channel = await uploader.create_dm()
+
         await dm_channel.send(embed=user_embed)
 
-        response_embed = discord.Embed(
-            title=f"{approver.global_name} отклонил эту форму",
-            description=f"Идентификатор отклонителя: {approver.id}",
-            color=discord.Color.dark_red()
-        )
+        response_embed = embeds.MemberDeniedFormEmbed(approver)
 
         self.disable_all_items()
 
@@ -340,11 +260,7 @@ class FormsCog(commands.Cog):
         form_path = path_join("data", "form.json")
 
         if not path_exists(form_path): # Abort if form.json doesn't exist
-            response_embed = discord.Embed(
-                title="Файл структуры не найден",
-                description="Файл структуры сообщения не найден. Задайте его командой `/form set`",
-                color=discord.Color.red()
-            )
+            response_embed = embeds.StructureFileNotFoundEmbed()
             await ctx.respond(embed=response_embed, ephemeral=True)
 
             return
@@ -362,25 +278,21 @@ class FormsCog(commands.Cog):
                 else:
                     await message_to_delete.delete()
 
-        embeds = []
+        _embeds = []
 
         with open(form_path, "r", encoding="UTF-8") as f:
             embeds_list = json_load(f)
-            embeds = [discord.Embed.from_dict(e) for e in embeds_list]
+            _embeds = [discord.Embed.from_dict(e) for e in embeds_list]
 
-        message = await channel.send(embeds=embeds, view=FormUploadView())
+        message = await channel.send(embeds=_embeds, view=FormUploadView())
 
         with open(lastmsg_path, "w") as f:
             f.write(str(message.id))
 
-        response_embed = discord.Embed(
-            title="Сообщение формы обновлено",
-            description=f"Сообщение с формой было обновлено согласно данным, предоставленными "
-                        f"вами.\nВы можете увидеть новое сообщение [тут]({message.jump_url})",
-            color=discord.Color.green()
-        )
+        response_embed = embeds.MessageUpdatedEmbed()
 
         await ctx.respond(embed=response_embed, ephemeral=True)
+
 
 
     @GROUP.command(
@@ -456,7 +368,7 @@ class FormsCog(commands.Cog):
     async def fset(self, ctx: discord.ApplicationContext, title: str, text: str, color: str = "FFFFFF", image: discord.Attachment = None):
         await ctx.defer(ephemeral=True)
         
-        embeds = []
+        _embeds = []
 
         if image is not None:
             e = discord.Embed(
@@ -464,7 +376,7 @@ class FormsCog(commands.Cog):
             )
             e.set_image(url=image.url)
 
-            embeds.append(e.to_dict())
+            _embeds.append(e.to_dict())
 
         e = discord.Embed(
             title=title,
@@ -472,23 +384,18 @@ class FormsCog(commands.Cog):
             color=int(str(color), 16)
         )
 
-        embeds.append(e.to_dict())
+        _embeds.append(e.to_dict())
 
 
         form_path = path_join("data", "form.json")
 
         with open(form_path, "w") as f:
-            json_dump(embeds, f, indent=4)
+            json_dump(_embeds, f, indent=4)
 
-        response_embed = discord.Embed(
-            title="Новое сообщение установлено",
-            description="Ваше новое сообщение с формой было установлено.\n"
-                        "Для того, чтобы изменения вступили в силу, используйте команду "
-                        "`/form update`",
-            color=discord.Color.green()
-        )
+        response_embed = embeds.NewStructureSetEmbed()
 
         await ctx.respond(embed=response_embed, ephemeral=True)
+
 
 
     @GROUP.command(
@@ -536,11 +443,7 @@ class FormsCog(commands.Cog):
     @commands.has_any_role(*ADMIN_ROLES)
     async def fview(self, ctx: discord.ApplicationContext, form_id: str = -1, user_id: str = -1):
         if form_id == -1 and user_id == -1:
-            embed = discord.Embed(
-                title="Нету аргументов",
-                description="Хотя-бы один из аргументов команды должен быть равен чему-то",
-                color=discord.Color.orange()
-            )
+            embed = embeds.MissingArgumentsEmbed()
 
             await ctx.respond(embed=embed, ephemeral=True)
             return
@@ -549,11 +452,7 @@ class FormsCog(commands.Cog):
             form_id = int(form_id)
             user_id = int(user_id)
         except ValueError:
-            embed = discord.Embed(
-                title="Неверное значение ИД формы/пользователя",
-                description="ИД должно быть целым числом!",
-                color=discord.Color.dark_red()
-            )
+            embed = embeds.IncorrectIdEmbed()
 
             await ctx.respond(embed=embed, ephemeral=True)
             return
@@ -561,10 +460,7 @@ class FormsCog(commands.Cog):
         data = DATABASE.exctract_record_data(form_id=form_id, uid=user_id)
 
         if data is None:
-            embed = discord.Embed(
-                title="Данные отсутствуют",
-                color=discord.Color.orange()
-            )
+            embed = embeds.NoDataFormViewEmbed()
 
             await ctx.respond(embed=embed, ephemeral=True)
             return
@@ -579,30 +475,18 @@ class FormsCog(commands.Cog):
         approver = data["approver_uid"] or "Нету"
 
 
-        embed = discord.Embed(
-            title=f"Форма #{id}",
-            description=f"Дата загрузки: <t:{upload_time}:f>\n"
-                        f"ИД отправителя: {uploader}\n"
-                        f"ИД подтвердителя/отклонителя: {approver}",
-            color=discord.Color(int("FFFFFF", 16))
-        )
-        embed.add_field(
-            name="Ссылка на профиль Steam",
-            value=steam_profile_url,
-            inline=False
-        )
-        embed.add_field(
-            name="Ссылки на творчества Steam",
-            value=steam_content_url,
-            inline=False
-        )
-        embed.add_field(
-            name="Претендованные роли",
-            value=claimed_roles,
-            inline=False
+        embed = embeds.FormViewDataEmbed(
+            id,
+            uploader,
+            approver,
+            upload_time,
+            steam_profile_url,
+            steam_content_url,
+            claimed_roles
         )
 
         await ctx.respond(embed=embed, ephemeral=True)
+
 
 
     @GROUP.command(
@@ -651,11 +535,7 @@ class FormsCog(commands.Cog):
     @commands.cooldown(1, 15, commands.BucketType.guild)
     async def fdelete(self, ctx: discord.ApplicationContext, form_id: str = -1, user_id: str = -1):
         if form_id == -1 and user_id == -1:
-            embed = discord.Embed(
-                title="Нету аргументов",
-                description="Хотя-бы один из аргументов команды должен быть равен чему-то",
-                color=discord.Color.orange()
-            )
+            embed = embeds.MissingArgumentsEmbed()
 
             await ctx.respond(embed=embed, ephemeral=True)
             return
@@ -664,21 +544,14 @@ class FormsCog(commands.Cog):
             form_id = int(form_id)
             user_id = int(user_id)
         except ValueError:
-            embed = discord.Embed(
-                title="Неверное значение ИД формы/пользователя",
-                description="ИД должно быть целым числом!",
-                color=discord.Color.dark_red()
-            )
+            embed = embeds.IncorrectIdEmbed()
 
             await ctx.respond(embed=embed, ephemeral=True)
             return
         
         DATABASE.remove_record(form_id=form_id, uid=user_id)
 
-        embed = discord.Embed(
-            title="Данные формы были удалены",
-            color=discord.Color.red()
-        )
+        embed = embeds.FormDeletedEmbed()
 
         await ctx.respond(embed=embed, ephemeral=True)
 
