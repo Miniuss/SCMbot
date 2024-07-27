@@ -350,3 +350,12 @@ class IncorrectIdEmbed(Embed):
         self.color = Color.dark_red()
 
         self.description = "ИД должно быть целым числом!"
+
+class FormApprovalActionInboundEmbed(Embed):
+    def __init__(self):
+        super().__init__()
+
+        self.title = "Данное действие уже выполняется!"
+        self.color = Color.red()
+
+        self.description = "Данное действие уже выполняется или выполнилось другим пользователем!"

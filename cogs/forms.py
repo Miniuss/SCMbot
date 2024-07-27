@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 
 from utils import sqlmgr
-from extras import embeds
+from extras import embeds, views
 
 from configparser import ConfigParser
 from os.path import join as path_join
@@ -11,220 +11,16 @@ from os.path import exists as path_exists
 from json import load as json_load
 from json import dump as json_dump
 
-from time import time as timenow
-
 
 
 CONFIG = ConfigParser()
 CONFIG.read("config.cfg")
 
 ADMIN_ROLES = list(map(int, CONFIG["Perms"]["admin_roles"].replace(" ", "").split(",")))
-NO_FORM_ROLES = list(map(int, CONFIG["Perms"]["no_form_roles"].replace(" ", "").split(",")))
 
 MSG_CHANNEL = int(CONFIG["Form"]["msg_channel"])
-SUBMIT_CHANNEL = int(CONFIG["Form"]["submit_channel"])
 
 DATABASE = sqlmgr.DatabaseManager("data/form_data.db")
-
-
-class FormModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(
-            title="Заявка на получение роли Steam Content Makers",
-            custom_id="form_modal",
-            timeout=None
-        )
-
-        self.elements = {
-            "steam_profile_url": discord.ui.InputText(
-                style=discord.InputTextStyle.short,
-                custom_id="steam_profile_url",
-                label="Ссылка на ваш профиль Steam",
-                placeholder="https://steamcommunity.com/id/...",
-                min_length=31,
-                max_length=100,
-                required=True
-            ),
-            "steam_content_url": discord.ui.InputText(
-                style=discord.InputTextStyle.long,
-                custom_id="steam_content_url",
-                label="Ссылки на ваши творчества Steam",
-                placeholder="https://steamcommunity.com/sharedfiles/filedetails/?id=...",
-                min_length=56,
-                max_length=800,
-                required=True
-            ),
-            "claimed_roles": discord.ui.InputText(
-                style=discord.InputTextStyle.long,
-                custom_id="claimed_roles",
-                label="Роли, на которые вы претендуете",
-                placeholder="Писатель руководств\nИллюстратор\nМододел и так далее...",
-                min_length=1,
-                max_length=200,
-                required=True
-            )
-        }
-
-        for e in self.elements.values():
-            self.add_item(e)
-
-    async def callback(self, inter: discord.Interaction):
-        await inter.response.defer(ephemeral=True)
-
-        uploader = inter.user
-        profile_url = self.elements["steam_profile_url"].value
-        content_url = self.elements["steam_content_url"].value
-        claimed_roles = self.elements["claimed_roles"].value
-
-        DATABASE.write_form_data(
-            uid=uploader.id,
-            upload_time=round(timenow()),
-            steam_profile_url=profile_url,
-            steam_content_url=content_url,
-            claimed_roles=claimed_roles
-        )
-
-        form_id = DATABASE.exctract_record_data(uid=uploader.id)["id"]
-        channel = inter.guild.get_channel(SUBMIT_CHANNEL)
-
-        embed = embeds.FormSubmittedInfoEmbed(
-            form_id,
-            uploader,
-            profile_url,
-            content_url,
-            claimed_roles
-        )
-
-        await channel.send(embed=embed, view=FormModSubmitView(uploader.id))
-
-        response_embed = embeds.FormSubmitSuccessEmbed(form_id)
-
-        await inter.respond(embed=response_embed, ephemeral=True)
-
-class FormUploadView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        custom_id="form_upload_button",
-        label="Написать заявку",
-        emoji="📝",
-        style=discord.ButtonStyle.green
-    )
-    async def form_upload_button(self, button: discord.ui.Button, inter: discord.Interaction):
-        data = DATABASE.exctract_record_data(uid=inter.user.id)
-
-        uploader_roles = inter.user.roles
-
-        if data is not None:
-            embed = embeds.FormAlreadySubmittedEmbed(data["id"])
-
-            await inter.respond(embed=embed, ephemeral=True)
-            return
-        
-        if any(role.id in NO_FORM_ROLES for role in uploader_roles):
-            embed = embeds.FromSubmitterHasRoleEmbed()
-
-            await inter.respond(embed=embed, ephemeral=True)
-            return
-        
-        await inter.response.send_modal(FormModal())
-
-class FormModSubmitView(discord.ui.View):
-    def __init__(self, uid: int):
-        super().__init__(timeout=None)
-        self.uid = uid
-
-    @discord.ui.button(
-        custom_id="form_approve_button",
-        label="Принять форму",
-        emoji="✔️",
-        style=discord.ButtonStyle.green
-    )
-    async def approve(self, button: discord.ui.Button, inter: discord.Interaction):
-        uploader = inter.guild.get_member(self.uid)
-        approver = inter.user
-
-        if not any(role.id in ADMIN_ROLES for role in approver.roles):
-            response_embed = embeds.FormNoPermsEmbed()
-
-            await inter.respond(embed=response_embed, ephemeral=True)
-            return
-
-        if uploader is None:
-            DATABASE.remove_record(uid=self.uid)
-
-            response_embed = embeds.FormOwnerNotFoundEmbed()
-
-            await inter.respond(response_embed)
-            self.disable_all_items()
-
-            return
-        
-        await inter.response.defer()
-
-        DATABASE.role_approval(approver.id, uid=self.uid)
-
-        user_embed = embeds.FormApprovedEmbed(
-            inter.guild.name,
-            approver
-        )
-
-        dm_channel = await uploader.create_dm()
-        
-        await dm_channel.send(embed=user_embed)
-
-        response_embed = embeds.MemberApprovedFormEmbed(approver)
-
-        self.disable_all_items()
-
-        await inter.message.edit(view=self)
-        await inter.respond(embed=response_embed)
-
-    @discord.ui.button(
-        custom_id="form_disapprove_button",
-        label="Отклонить форму",
-        emoji="✖️",
-        style=discord.ButtonStyle.red
-    )
-    async def reject(self, button: discord.ui.Button, inter: discord.Interaction):
-        uploader = inter.guild.get_member(self.uid)
-        approver = inter.user
-
-        if not any(role.id in ADMIN_ROLES for role in approver.roles):
-            response_embed = embeds.FormNoPermsEmbed()
-
-            await inter.respond(embed=response_embed, ephemeral=True)
-            return
-
-        if uploader is None:
-            DATABASE.remove_record(uid=self.uid)
-
-            response_embed = embeds.FormOwnerNotFoundEmbed()
-            await inter.respond(response_embed)
-            self.disable_all_items()
-
-            return
-        
-        await inter.response.defer()
-
-        DATABASE.role_approval(approver.id, uid=self.uid)
-
-        user_embed = embeds.FormDeniedEmbed(
-            inter.guild.name,
-            approver
-        )
-
-        dm_channel = await uploader.create_dm()
-
-        await dm_channel.send(embed=user_embed)
-
-        response_embed = embeds.MemberDeniedFormEmbed(approver)
-
-        self.disable_all_items()
-
-        await inter.message.edit(view=self)
-        await inter.respond(embed=response_embed)
 
 
 
@@ -284,7 +80,7 @@ class FormsCog(commands.Cog):
             embeds_list = json_load(f)
             _embeds = [discord.Embed.from_dict(e) for e in embeds_list]
 
-        message = await channel.send(embeds=_embeds, view=FormUploadView())
+        message = await channel.send(embeds=_embeds, view=views.FormUploadView())
 
         with open(lastmsg_path, "w") as f:
             f.write(str(message.id))
